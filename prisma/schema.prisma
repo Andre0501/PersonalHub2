@@ -1,0 +1,753 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["personalhub"]
+}
+
+model User {
+  id                  String                  @id @default(dbgenerated("gen_random_uuid()")) @map("user_id") @db.Uuid
+  authSubject         String?                 @unique @map("auth_subject") @db.Uuid
+  emailNormalized     String                  @unique @map("email_normalized")
+  role                String
+  displayName         String                  @map("display_name")
+  accountStatus       String                  @default("ACTIVE") @map("account_status")
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  trainerProfile      TrainerProfile?         @relation("TrainerProfileUser")
+  studentProfile      StudentProfile?         @relation("StudentProfileUser")
+  consents            ConsentRecord[]         @relation("ConsentRecordActor")
+  workoutrevisions    WorkoutRevision[]       @relation("WorkoutRevisionActor")
+  assessmentrevisions AssessmentRevision[]    @relation("AssessmentRevisionActor")
+  bodyweightrevisions BodyWeightRevision[]    @relation("BodyWeightRevisionActor")
+  sharednoterevisions SharedNoteRevision[]    @relation("SharedNoteRevisionActor")
+  mealrevisions       MealRevision[]          @relation("MealRevisionActor")
+  auditReferences     AuditEventSubject[]     @relation("AuditEventSubjectUser")
+  requests            DataSubjectRequest[]    @relation("DataSubjectRequestSubject")
+  actions             DataDispositionAction[] @relation("DataDispositionActionSubject")
+  closures            AccountClosureCase[]    @relation("AccountClosureCaseSubject")
+  initiatedClosures   AccountClosureCase[]    @relation("AccountClosureCaseInitiator")
+
+  @@map("users")
+  @@schema("personalhub")
+}
+
+model TrainerProfile {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @map("trainer_id") @db.Uuid
+  userId        String               @unique @map("user_id") @db.Uuid
+  user          User                 @relation("TrainerProfileUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  requests      LinkRequest[]        @relation("LinkRequestTrainer")
+  links         TrainerStudentLink[] @relation("TrainerStudentLinkTrainer")
+  exercises     Exercise[]           @relation("ExerciseTrainer")
+  plans         WorkoutPlan[]        @relation("WorkoutPlanTrainer")
+  assessments   Assessment[]         @relation("AssessmentAuthor")
+  notes         SharedNote[]         @relation("SharedNoteAuthor")
+  appointments  Appointment[]        @relation("AppointmentTrainer")
+  subscriptions Subscription[]       @relation("SubscriptionTrainer")
+
+  @@map("trainer_profiles")
+  @@schema("personalhub")
+}
+
+model StudentProfile {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @map("student_id") @db.Uuid
+  userId       String               @unique @map("user_id") @db.Uuid
+  shareCode    String               @unique @default(dbgenerated("gen_random_uuid()")) @map("share_code") @db.Uuid
+  user         User                 @relation("StudentProfileUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  requests     LinkRequest[]        @relation("LinkRequestStudent")
+  links        TrainerStudentLink[] @relation("TrainerStudentLinkStudent")
+  plans        WorkoutPlan[]        @relation("WorkoutPlanStudent")
+  executions   WorkoutExecution[]   @relation("WorkoutExecutionStudent")
+  assessments  Assessment[]         @relation("AssessmentStudent")
+  weights      BodyWeightRecord[]   @relation("BodyWeightRecordStudent")
+  notes        SharedNote[]         @relation("SharedNoteStudent")
+  meals        Meal[]               @relation("MealStudent")
+  appointments Appointment[]        @relation("AppointmentStudent")
+  disputes     AppointmentDispute[] @relation("AppointmentDisputeStudent")
+
+  @@map("student_profiles")
+  @@schema("personalhub")
+}
+
+model LinkRequest {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @map("request_id") @db.Uuid
+  trainerId      String              @map("trainer_id") @db.Uuid
+  studentId      String              @map("student_id") @db.Uuid
+  status         String              @default("PENDING")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt      DateTime            @map("expires_at") @db.Timestamptz(3)
+  resolvedAt     DateTime?           @map("resolved_at") @db.Timestamptz(3)
+  recordRevision Int                 @default(1) @map("record_revision")
+  trainer        TrainerProfile      @relation("LinkRequestTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student        StudentProfile      @relation("LinkRequestStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  link           TrainerStudentLink? @relation("TrainerStudentLinkOriginRequest")
+  consents       ConsentRecord[]     @relation("ConsentRecordRequest")
+
+  @@unique([id, trainerId, studentId])
+  @@index([studentId, status, createdAt])
+  @@index([trainerId, createdAt])
+  @@map("link_requests")
+  @@schema("personalhub")
+}
+
+model TrainerStudentLink {
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @map("link_id") @db.Uuid
+  trainerId        String               @map("trainer_id") @db.Uuid
+  studentId        String               @map("student_id") @db.Uuid
+  originRequestId  String               @unique @map("origin_request_id") @db.Uuid
+  status           String               @default("ACTIVE")
+  startedAt        DateTime             @map("started_at") @db.Timestamptz(3)
+  endedAt          DateTime?            @map("ended_at") @db.Timestamptz(3)
+  endReason        String?              @map("end_reason")
+  replacedByLinkId String?              @map("replaced_by_link_id") @db.Uuid
+  trainer          TrainerProfile       @relation("TrainerStudentLinkTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student          StudentProfile       @relation("TrainerStudentLinkStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  originRequest    LinkRequest          @relation("TrainerStudentLinkOriginRequest", fields: [originRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  replacement      TrainerStudentLink?  @relation("TrainerStudentLinkReplacement", fields: [replacedByLinkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  predecessors     TrainerStudentLink[] @relation("TrainerStudentLinkReplacement")
+  consents         ConsentRecord[]      @relation("ConsentRecordLink")
+  plans            WorkoutPlan[]        @relation("WorkoutPlanOriginLink")
+  assessments      Assessment[]         @relation("AssessmentOriginLink")
+  notes            SharedNote[]         @relation("SharedNoteOriginLink")
+  appointments     Appointment[]        @relation("AppointmentLink")
+
+  @@unique([id, trainerId, studentId])
+  @@index([trainerId, status])
+  @@index([studentId, startedAt])
+  @@map("trainer_student_links")
+  @@schema("personalhub")
+}
+
+model ConsentRecord {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @map("consent_record_id") @db.Uuid
+  linkId           String             @map("link_id") @db.Uuid
+  decision         String
+  scopeVersion     String             @map("scope_version")
+  noticeVersion    String             @map("notice_version")
+  purpose          String
+  actorUserId      String             @map("actor_user_id") @db.Uuid
+  relatedRequestId String?            @map("related_request_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  link             TrainerStudentLink @relation("ConsentRecordLink", fields: [linkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor            User               @relation("ConsentRecordActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  request          LinkRequest?       @relation("ConsentRecordRequest", fields: [relatedRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([linkId, decision])
+  @@map("consent_records")
+  @@schema("personalhub")
+}
+
+model Exercise {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @map("exercise_id") @db.Uuid
+  trainerId      String               @map("trainer_id") @db.Uuid
+  name           String
+  nameNormalized String               @map("name_normalized")
+  description    String?
+  exerciseType   String               @map("exercise_type")
+  defaultUnit    String?              @map("default_unit")
+  status         String               @default("ACTIVE")
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  trainer        TrainerProfile       @relation("ExerciseTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prescriptions  PrescribedExercise[] @relation("PrescribedExerciseSourceExercise")
+
+  @@index([trainerId, status])
+  @@map("exercises")
+  @@schema("personalhub")
+}
+
+model WorkoutPlan {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @map("plan_id") @db.Uuid
+  trainerId    String               @map("trainer_id") @db.Uuid
+  studentId    String               @map("student_id") @db.Uuid
+  originLinkId String               @map("origin_link_id") @db.Uuid
+  title        String
+  status       String               @default("ACTIVE")
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  trainer      TrainerProfile       @relation("WorkoutPlanTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student      StudentProfile       @relation("WorkoutPlanStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  originLink   TrainerStudentLink   @relation("WorkoutPlanOriginLink", fields: [originLinkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  draft        WorkoutPlanDraft?    @relation("WorkoutPlanDraftPlan")
+  versions     WorkoutPlanVersion[] @relation("WorkoutPlanVersionPlan")
+
+  @@index([studentId, createdAt])
+  @@map("workout_plans")
+  @@schema("personalhub")
+}
+
+model WorkoutPlanDraft {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @map("draft_id") @db.Uuid
+  planId        String              @unique @map("plan_id") @db.Uuid
+  baseVersionId String?             @map("base_version_id") @db.Uuid
+  draftContent  Json                @map("draft_content")
+  draftRevision Int                 @default(1) @map("draft_revision")
+  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  plan          WorkoutPlan         @relation("WorkoutPlanDraftPlan", fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  baseVersion   WorkoutPlanVersion? @relation("WorkoutPlanDraftBaseVersion", fields: [baseVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("workout_plan_drafts")
+  @@schema("personalhub")
+}
+
+model WorkoutPlanVersion {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @map("plan_version_id") @db.Uuid
+  planId        String               @map("plan_id") @db.Uuid
+  versionNumber Int                  @map("version_number")
+  title         String
+  instructions  String?
+  snapshot      Json
+  publishedAt   DateTime             @default(now()) @map("published_at") @db.Timestamptz(3)
+  drafts        WorkoutPlanDraft[]   @relation("WorkoutPlanDraftBaseVersion")
+  plan          WorkoutPlan          @relation("WorkoutPlanVersionPlan", fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  exercises     PrescribedExercise[] @relation("PrescribedExerciseVersion")
+  executions    WorkoutExecution[]   @relation("WorkoutExecutionVersion")
+
+  @@unique([planId, versionNumber])
+  @@map("workout_plan_versions")
+  @@schema("personalhub")
+}
+
+model PrescribedExercise {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @map("prescribed_exercise_id") @db.Uuid
+  planVersionId       String              @map("plan_version_id") @db.Uuid
+  sourceExerciseId    String              @map("source_exercise_id") @db.Uuid
+  position            Int
+  nameSnapshot        String              @map("name_snapshot")
+  descriptionSnapshot String?             @map("description_snapshot")
+  instructions        String?
+  version             WorkoutPlanVersion  @relation("PrescribedExerciseVersion", fields: [planVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceExercise      Exercise            @relation("PrescribedExerciseSourceExercise", fields: [sourceExerciseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sets                PrescribedSet[]     @relation("PrescribedSetExercise")
+  executions          ExerciseExecution[] @relation("ExerciseExecutionPrescription")
+
+  @@unique([planVersionId, position])
+  @@map("prescribed_exercises")
+  @@schema("personalhub")
+}
+
+model PrescribedSet {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @map("prescribed_set_id") @db.Uuid
+  prescribedExerciseId String             @map("prescribed_exercise_id") @db.Uuid
+  position             Int
+  targetReps           Int?               @map("target_reps")
+  targetLoadKg         Decimal?           @map("target_load_kg") @db.Decimal(12, 3)
+  targetSeconds        Int?               @map("target_seconds")
+  targetMeters         Decimal?           @map("target_meters") @db.Decimal(12, 3)
+  exercise             PrescribedExercise @relation("PrescribedSetExercise", fields: [prescribedExerciseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executions           SetExecution[]     @relation("SetExecutionPrescription")
+
+  @@unique([prescribedExerciseId, position])
+  @@map("prescribed_sets")
+  @@schema("personalhub")
+}
+
+model WorkoutExecution {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @map("execution_id") @db.Uuid
+  studentId         String              @map("student_id") @db.Uuid
+  planVersionId     String              @map("plan_version_id") @db.Uuid
+  status            String              @default("IN_PROGRESS")
+  executionRevision Int                 @default(1) @map("execution_revision")
+  startedAt         DateTime            @map("started_at") @db.Timestamptz(3)
+  finishedAt        DateTime?           @map("finished_at") @db.Timestamptz(3)
+  currentRevisionId String?             @map("current_revision_id") @db.Uuid
+  student           StudentProfile      @relation("WorkoutExecutionStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  version           WorkoutPlanVersion  @relation("WorkoutExecutionVersion", fields: [planVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  exercises         ExerciseExecution[] @relation("ExerciseExecutionExecution")
+  revisions         WorkoutRevision[]   @relation("WorkoutRevisionParent")
+
+  @@index([studentId, startedAt])
+  @@map("workout_executions")
+  @@schema("personalhub")
+}
+
+model ExerciseExecution {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @map("exercise_execution_id") @db.Uuid
+  executionId          String             @map("execution_id") @db.Uuid
+  prescribedExerciseId String             @map("prescribed_exercise_id") @db.Uuid
+  status               String             @default("NOT_STARTED")
+  execution            WorkoutExecution   @relation("ExerciseExecutionExecution", fields: [executionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prescription         PrescribedExercise @relation("ExerciseExecutionPrescription", fields: [prescribedExerciseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sets                 SetExecution[]     @relation("SetExecutionExercise")
+
+  @@unique([executionId, prescribedExerciseId])
+  @@map("exercise_executions")
+  @@schema("personalhub")
+}
+
+model SetExecution {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @map("set_execution_id") @db.Uuid
+  exerciseExecutionId String            @map("exercise_execution_id") @db.Uuid
+  prescribedSetId     String            @map("prescribed_set_id") @db.Uuid
+  status              String            @default("NOT_STARTED")
+  actualReps          Int?              @map("actual_reps")
+  actualLoadKg        Decimal?          @map("actual_load_kg") @db.Decimal(12, 3)
+  actualSeconds       Int?              @map("actual_seconds")
+  actualMeters        Decimal?          @map("actual_meters") @db.Decimal(12, 3)
+  exercise            ExerciseExecution @relation("SetExecutionExercise", fields: [exerciseExecutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prescription        PrescribedSet     @relation("SetExecutionPrescription", fields: [prescribedSetId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([exerciseExecutionId, prescribedSetId])
+  @@map("set_executions")
+  @@schema("personalhub")
+}
+
+model WorkoutRevision {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @map("revision_id") @db.Uuid
+  executionId        String           @map("execution_id") @db.Uuid
+  revisionNumber     Int              @map("revision_number")
+  previousRevisionId String?          @map("previous_revision_id") @db.Uuid
+  snapshot           Json
+  reason             String?
+  actorUserId        String           @map("actor_user_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  parent             WorkoutExecution @relation("WorkoutRevisionParent", fields: [executionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor              User             @relation("WorkoutRevisionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([executionId, revisionNumber])
+  @@unique([executionId, id])
+  @@map("workout_revisions")
+  @@schema("personalhub")
+}
+
+model Assessment {
+  id                String                  @id @default(dbgenerated("gen_random_uuid()")) @map("assessment_id") @db.Uuid
+  studentId         String                  @map("student_id") @db.Uuid
+  authorTrainerId   String                  @map("author_trainer_id") @db.Uuid
+  originLinkId      String                  @map("origin_link_id") @db.Uuid
+  status            String                  @default("DRAFT")
+  title             String
+  assessedAt        DateTime                @map("assessed_at") @db.Timestamptz(3)
+  currentRevisionId String?                 @map("current_revision_id") @db.Uuid
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  student           StudentProfile          @relation("AssessmentStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  author            TrainerProfile          @relation("AssessmentAuthor", fields: [authorTrainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  originLink        TrainerStudentLink      @relation("AssessmentOriginLink", fields: [originLinkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  measurements      AssessmentMeasurement[] @relation("AssessmentMeasurementAssessment")
+  revisions         AssessmentRevision[]    @relation("AssessmentRevisionParent")
+
+  @@map("assessments")
+  @@schema("personalhub")
+}
+
+model MeasurementDefinition {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @map("measurement_definition_id") @db.Uuid
+  code           String                  @unique
+  name           String
+  valueType      String                  @map("value_type")
+  canonicalUnit  String?                 @map("canonical_unit")
+  minValue       Decimal?                @map("min_value") @db.Decimal(12, 3)
+  maxValue       Decimal?                @map("max_value") @db.Decimal(12, 3)
+  requiresMethod Boolean                 @default(false) @map("requires_method")
+  status         String                  @default("ACTIVE")
+  measurements   AssessmentMeasurement[] @relation("AssessmentMeasurementDefinition")
+
+  @@map("measurement_definitions")
+  @@schema("personalhub")
+}
+
+model AssessmentMeasurement {
+  id                      String                @id @default(dbgenerated("gen_random_uuid()")) @map("measurement_id") @db.Uuid
+  assessmentId            String                @map("assessment_id") @db.Uuid
+  measurementDefinitionId String                @map("measurement_definition_id") @db.Uuid
+  measurementContext      String                @default("") @map("measurement_context")
+  method                  String?
+  numericValue            Decimal?              @map("numeric_value") @db.Decimal(12, 3)
+  textValue               String?               @map("text_value")
+  booleanValue            Boolean?              @map("boolean_value")
+  assessment              Assessment            @relation("AssessmentMeasurementAssessment", fields: [assessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  definition              MeasurementDefinition @relation("AssessmentMeasurementDefinition", fields: [measurementDefinitionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([assessmentId, measurementDefinitionId, measurementContext])
+  @@map("assessment_measurements")
+  @@schema("personalhub")
+}
+
+model AssessmentRevision {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @map("assessment_revision_id") @db.Uuid
+  assessmentId       String     @map("assessment_id") @db.Uuid
+  revisionNumber     Int        @map("revision_number")
+  previousRevisionId String?    @map("previous_revision_id") @db.Uuid
+  snapshot           Json
+  reason             String?
+  actorUserId        String     @map("actor_user_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  parent             Assessment @relation("AssessmentRevisionParent", fields: [assessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor              User       @relation("AssessmentRevisionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([assessmentId, revisionNumber])
+  @@unique([assessmentId, id])
+  @@map("assessment_revisions")
+  @@schema("personalhub")
+}
+
+model BodyWeightRecord {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @map("weight_record_id") @db.Uuid
+  studentId         String               @map("student_id") @db.Uuid
+  kg                Decimal              @db.Decimal(6, 2)
+  measuredAt        DateTime             @map("measured_at") @db.Timestamptz(3)
+  note              String?
+  status            String               @default("ACTIVE")
+  revisionNumber    Int                  @default(1) @map("revision_number")
+  currentRevisionId String               @map("current_revision_id") @db.Uuid
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  student           StudentProfile       @relation("BodyWeightRecordStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revisions         BodyWeightRevision[] @relation("BodyWeightRevisionParent")
+
+  @@index([studentId, measuredAt, id])
+  @@map("body_weight_records")
+  @@schema("personalhub")
+}
+
+model BodyWeightRevision {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @map("weight_revision_id") @db.Uuid
+  recordId           String           @map("record_id") @db.Uuid
+  revisionNumber     Int              @map("revision_number")
+  previousRevisionId String?          @map("previous_revision_id") @db.Uuid
+  snapshot           Json
+  reason             String?
+  actorUserId        String           @map("actor_user_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  parent             BodyWeightRecord @relation("BodyWeightRevisionParent", fields: [recordId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor              User             @relation("BodyWeightRevisionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([recordId, revisionNumber])
+  @@unique([recordId, id])
+  @@map("body_weight_revisions")
+  @@schema("personalhub")
+}
+
+model SharedNote {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @map("note_id") @db.Uuid
+  studentId         String               @map("student_id") @db.Uuid
+  authorTrainerId   String               @map("author_trainer_id") @db.Uuid
+  originLinkId      String               @map("origin_link_id") @db.Uuid
+  title             String
+  content           String
+  status            String               @default("DRAFT")
+  currentRevisionId String?              @map("current_revision_id") @db.Uuid
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  student           StudentProfile       @relation("SharedNoteStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  author            TrainerProfile       @relation("SharedNoteAuthor", fields: [authorTrainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  originLink        TrainerStudentLink   @relation("SharedNoteOriginLink", fields: [originLinkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revisions         SharedNoteRevision[] @relation("SharedNoteRevisionParent")
+
+  @@map("shared_notes")
+  @@schema("personalhub")
+}
+
+model SharedNoteRevision {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @map("note_revision_id") @db.Uuid
+  noteId             String     @map("note_id") @db.Uuid
+  revisionNumber     Int        @map("revision_number")
+  previousRevisionId String?    @map("previous_revision_id") @db.Uuid
+  snapshot           Json
+  reason             String?
+  actorUserId        String     @map("actor_user_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  parent             SharedNote @relation("SharedNoteRevisionParent", fields: [noteId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor              User       @relation("SharedNoteRevisionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([noteId, revisionNumber])
+  @@unique([noteId, id])
+  @@map("shared_note_revisions")
+  @@schema("personalhub")
+}
+
+model Meal {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @map("meal_id") @db.Uuid
+  studentId         String         @map("student_id") @db.Uuid
+  consumedAt        DateTime       @map("consumed_at") @db.Timestamptz(3)
+  mealType          String?        @map("meal_type")
+  note              String?
+  status            String         @default("ACTIVE")
+  currentRevisionId String         @map("current_revision_id") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  student           StudentProfile @relation("MealStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  items             MealItem[]     @relation("MealItemMeal")
+  revisions         MealRevision[] @relation("MealRevisionParent")
+
+  @@index([studentId, consumedAt])
+  @@map("meals")
+  @@schema("personalhub")
+}
+
+model MealItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @map("meal_item_id") @db.Uuid
+  mealId      String  @map("meal_id") @db.Uuid
+  position    Int
+  description String
+  quantity    Decimal @db.Decimal(12, 3)
+  unit        String
+  meal        Meal    @relation("MealItemMeal", fields: [mealId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([mealId, position])
+  @@map("meal_items")
+  @@schema("personalhub")
+}
+
+model MealRevision {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @map("meal_revision_id") @db.Uuid
+  mealId             String   @map("meal_id") @db.Uuid
+  revisionNumber     Int      @map("revision_number")
+  previousRevisionId String?  @map("previous_revision_id") @db.Uuid
+  snapshot           Json
+  reason             String?
+  actorUserId        String   @map("actor_user_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  parent             Meal     @relation("MealRevisionParent", fields: [mealId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor              User     @relation("MealRevisionActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([mealId, revisionNumber])
+  @@unique([mealId, id])
+  @@map("meal_revisions")
+  @@schema("personalhub")
+}
+
+model Appointment {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @map("appointment_id") @db.Uuid
+  trainerId      String               @map("trainer_id") @db.Uuid
+  studentId      String               @map("student_id") @db.Uuid
+  linkId         String               @map("link_id") @db.Uuid
+  startsAt       DateTime             @map("starts_at") @db.Timestamptz(3)
+  endsAt         DateTime             @map("ends_at") @db.Timestamptz(3)
+  timezone       String
+  status         String               @default("SCHEDULED")
+  statusReason   String?              @map("status_reason")
+  recordRevision Int                  @default(1) @map("record_revision")
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  trainer        TrainerProfile       @relation("AppointmentTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student        StudentProfile       @relation("AppointmentStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  link           TrainerStudentLink   @relation("AppointmentLink", fields: [linkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events         AppointmentEvent[]   @relation("AppointmentEventAppointment")
+  disputes       AppointmentDispute[] @relation("AppointmentDisputeAppointment")
+
+  @@unique([id, studentId])
+  @@index([linkId, status, startsAt])
+  @@map("appointments")
+  @@schema("personalhub")
+}
+
+model AppointmentEvent {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @map("appointment_event_id") @db.Uuid
+  appointmentId  String      @map("appointment_id") @db.Uuid
+  sequence       Int
+  operationId    String      @map("operation_id") @db.Uuid
+  eventType      String      @map("event_type")
+  previousStatus String?     @map("previous_status")
+  newStatus      String      @map("new_status")
+  reason         String?
+  details        Json?
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  appointment    Appointment @relation("AppointmentEventAppointment", fields: [appointmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operation      AuditEvent  @relation("AppointmentEventOperation", fields: [operationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([appointmentId, sequence])
+  @@map("appointment_events")
+  @@schema("personalhub")
+}
+
+model AppointmentDispute {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @map("dispute_id") @db.Uuid
+  appointmentId      String         @map("appointment_id") @db.Uuid
+  studentId          String         @map("student_id") @db.Uuid
+  status             String         @default("OPEN")
+  claim              String
+  assignedActorRef   String?        @map("assigned_actor_ref")
+  resolvedByActorRef String?        @map("resolved_by_actor_ref")
+  resolutionCode     String?        @map("resolution_code")
+  resolutionReason   String?        @map("resolution_reason")
+  openedAt           DateTime       @default(now()) @map("opened_at") @db.Timestamptz(3)
+  resolvedAt         DateTime?      @map("resolved_at") @db.Timestamptz(3)
+  appointment        Appointment    @relation("AppointmentDisputeAppointment", fields: [appointmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  student            StudentProfile @relation("AppointmentDisputeStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("appointment_disputes")
+  @@schema("personalhub")
+}
+
+model SubscriptionPlan {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @map("subscription_plan_id") @db.Uuid
+  offerCode      String            @map("offer_code")
+  version        Int
+  code           String
+  billingPeriod  String            @map("billing_period")
+  status         String            @default("DRAFT")
+  canonicalFree  Boolean           @default(false) @map("canonical_free")
+  priceCents     Int               @map("price_cents")
+  currency       String            @default("BRL")
+  effectiveFrom  DateTime          @map("effective_from") @db.Timestamptz(3)
+  effectiveUntil DateTime?         @map("effective_until") @db.Timestamptz(3)
+  entitlements   PlanEntitlement[] @relation("PlanEntitlementPlan")
+  subscriptions  Subscription[]    @relation("SubscriptionPlan")
+
+  @@unique([offerCode, version])
+  @@map("subscription_plans")
+  @@schema("personalhub")
+}
+
+model PlanEntitlement {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @map("entitlement_id") @db.Uuid
+  planId       String           @map("plan_id") @db.Uuid
+  featureCode  String           @map("feature_code")
+  valueType    String           @map("value_type")
+  booleanValue Boolean?         @map("boolean_value")
+  integerValue Int?             @map("integer_value")
+  plan         SubscriptionPlan @relation("PlanEntitlementPlan", fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([planId, featureCode])
+  @@map("plan_entitlements")
+  @@schema("personalhub")
+}
+
+model Subscription {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @map("subscription_id") @db.Uuid
+  trainerId String              @map("trainer_id") @db.Uuid
+  planId    String              @map("plan_id") @db.Uuid
+  status    String
+  isCurrent Boolean             @default(true) @map("is_current")
+  startedAt DateTime            @map("started_at") @db.Timestamptz(3)
+  endedAt   DateTime?           @map("ended_at") @db.Timestamptz(3)
+  trainer   TrainerProfile      @relation("SubscriptionTrainer", fields: [trainerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  plan      SubscriptionPlan    @relation("SubscriptionPlan", fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events    SubscriptionEvent[] @relation("SubscriptionEventSubscription")
+
+  @@index([trainerId, isCurrent])
+  @@map("subscriptions")
+  @@schema("personalhub")
+}
+
+model SubscriptionEvent {
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @map("subscription_event_id") @db.Uuid
+  subscriptionId         String       @map("subscription_id") @db.Uuid
+  sequence               Int
+  operationId            String       @map("operation_id") @db.Uuid
+  eventType              String       @map("event_type")
+  providerNamespace      String?      @map("provider_namespace")
+  externalEventReference String?      @map("external_event_reference")
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  subscription           Subscription @relation("SubscriptionEventSubscription", fields: [subscriptionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  operation              AuditEvent   @relation("SubscriptionEventOperation", fields: [operationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([subscriptionId, sequence])
+  @@unique([providerNamespace, externalEventReference])
+  @@map("subscription_events")
+  @@schema("personalhub")
+}
+
+model AuditEvent {
+  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @map("operation_id") @db.Uuid
+  actorType              String              @map("actor_type")
+  actorRef               String              @map("actor_ref")
+  operationKey           String              @map("operation_key") @db.Uuid
+  operationCode          String              @map("operation_code")
+  operationSignature     String              @map("operation_signature")
+  outcome                String
+  receipt                Json
+  authorityRef           String?             @map("authority_ref")
+  authorityVersion       String?             @map("authority_version")
+  authorizationCheckedAt DateTime?           @map("authorization_checked_at") @db.Timestamptz(3)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  appointmentEvents      AppointmentEvent[]  @relation("AppointmentEventOperation")
+  subscriptionEvents     SubscriptionEvent[] @relation("SubscriptionEventOperation")
+  subjects               AuditEventSubject[] @relation("AuditEventSubjectOperation")
+
+  @@unique([actorRef, operationKey])
+  @@index([actorRef, operationCode, createdAt])
+  @@map("audit_events")
+  @@schema("personalhub")
+}
+
+model AuditEventSubject {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @map("audit_event_subject_id") @db.Uuid
+  operationId String     @map("operation_id") @db.Uuid
+  userId      String     @map("user_id") @db.Uuid
+  operation   AuditEvent @relation("AuditEventSubjectOperation", fields: [operationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user        User       @relation("AuditEventSubjectUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([operationId, userId])
+  @@map("audit_event_subjects")
+  @@schema("personalhub")
+}
+
+model DataSubjectRequest {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @map("subject_request_id") @db.Uuid
+  userId         String                  @map("user_id") @db.Uuid
+  requestType    String                  @map("request_type")
+  status         String                  @default("RECEIVED")
+  purpose        String
+  verifiedAt     DateTime?               @map("verified_at") @db.Timestamptz(3)
+  receivedAt     DateTime                @default(now()) @map("received_at") @db.Timestamptz(3)
+  closedAt       DateTime?               @map("closed_at") @db.Timestamptz(3)
+  decisionReason String?                 @map("decision_reason")
+  subject        User                    @relation("DataSubjectRequestSubject", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actions        DataDispositionAction[] @relation("DataDispositionActionRequest")
+  closures       AccountClosureCase[]    @relation("AccountClosureCaseRequest")
+
+  @@map("data_subject_requests")
+  @@schema("personalhub")
+}
+
+model RetentionPolicy {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @map("policy_id") @db.Uuid
+  code            String
+  version         Int
+  category        String
+  purpose         String
+  legalBasis      String                  @map("legal_basis")
+  reviewCondition String                  @map("review_condition")
+  status          String
+  effectiveFrom   DateTime                @map("effective_from") @db.Timestamptz(3)
+  effectiveUntil  DateTime?               @map("effective_until") @db.Timestamptz(3)
+  actions         DataDispositionAction[] @relation("DataDispositionActionPolicy")
+
+  @@unique([code, version])
+  @@map("retention_policies")
+  @@schema("personalhub")
+}
+
+model DataDispositionAction {
+  id                          String              @id @default(dbgenerated("gen_random_uuid()")) @map("action_id") @db.Uuid
+  requestId                   String?             @map("request_id") @db.Uuid
+  policyId                    String              @map("policy_id") @db.Uuid
+  subjectUserId               String              @map("subject_user_id") @db.Uuid
+  actionType                  String              @map("action_type")
+  status                      String
+  resourceType                String              @map("resource_type")
+  resourceId                  String?             @map("resource_id") @db.Uuid
+  dispositionScope            Json                @map("disposition_scope")
+  dependencyMatrixRef         String?             @map("dependency_matrix_ref")
+  dependencyMatrixVersion     String?             @map("dependency_matrix_version")
+  dependencyRuleCode          String?             @map("dependency_rule_code")
+  dependencyMatrixFingerprint String?             @map("dependency_matrix_fingerprint")
+  executedByActorRef          String?             @map("executed_by_actor_ref")
+  evidenceRef                 String?             @map("evidence_ref")
+  createdAt                   DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  completedAt                 DateTime?           @map("completed_at") @db.Timestamptz(3)
+  request                     DataSubjectRequest? @relation("DataDispositionActionRequest", fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  policy                      RetentionPolicy     @relation("DataDispositionActionPolicy", fields: [policyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  subject                     User                @relation("DataDispositionActionSubject", fields: [subjectUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("data_disposition_actions")
+  @@schema("personalhub")
+}
+
+model AccountClosureCase {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @map("closure_case_id") @db.Uuid
+  userId               String              @map("user_id") @db.Uuid
+  requestId            String?             @map("request_id") @db.Uuid
+  status               String
+  initiatedByActorType String              @map("initiated_by_actor_type")
+  initiatedByUserId    String?             @map("initiated_by_user_id") @db.Uuid
+  initiatedByActorRef  String?             @map("initiated_by_actor_ref")
+  openedAt             DateTime            @default(now()) @map("opened_at") @db.Timestamptz(3)
+  closedAt             DateTime?           @map("closed_at") @db.Timestamptz(3)
+  subject              User                @relation("AccountClosureCaseSubject", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  request              DataSubjectRequest? @relation("AccountClosureCaseRequest", fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  initiator            User?               @relation("AccountClosureCaseInitiator", fields: [initiatedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("account_closure_cases")
+  @@schema("personalhub")
+}
